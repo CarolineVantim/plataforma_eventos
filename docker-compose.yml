@@ -1,0 +1,55 @@
+services:
+    # image project
+    app:
+        build:
+            context: .
+            dockerfile: Dockerfile
+        restart: unless-stopped
+        working_dir: /var/www/
+        volumes:
+            - ./:/var/www
+        depends_on:
+            - redis
+        networks:
+            - laravel
+
+    # nginx
+    nginx:
+        image: nginx:alpine
+        restart: unless-stopped
+        ports:
+            - "8989:80"
+        volumes:
+            - ./:/var/www
+            - ./docker/nginx/:/etc/nginx/conf.d/
+        networks:
+            - laravel
+
+    mongo:
+        image: mongo:latest
+        restart: unless-stopped
+        ports:
+            - "27017:27017"
+        volumes:
+          - ./mongo-config:/docker-entrypoint-initdb.d:ro
+          - ./mongo-config:/etc/mongo-config
+          - ./data/mongo:/data/db
+        command: ["mongod", "--auth", "--config", "/etc/mongo-config/mongod.conf"]
+        environment:
+            MONGO_INITDB_ROOT_USERNAME: admin
+            MONGO_INITDB_ROOT_PASSWORD: adminpassword
+            MONGO_INITDB_DATABASE: meubanco
+            MONGO_INITDB_USERNAME: meuusuario
+            MONGO_INITDB_PASSWORD: senhasecreta
+        networks:
+            - laravel
+
+    # redis
+    redis:
+        image: redis:latest
+        networks:
+            - laravel
+
+networks:
+    laravel:
+        driver: bridge

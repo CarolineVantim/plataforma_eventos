@@ -1,28 +1,90 @@
-🎉 Plataforma de Eventos - Projeto de Banco de Dados Não Relacional
+# 📦 Plataforma de Eventos
 
-Este repositório contém o projeto Plataforma de Eventos, desenvolvido em PHP com conexão ao MongoDB, como parte da disciplina de Banco de Dados Não Relacional do 3º semestre da Fatec Araras.
+Projeto Laravel + MongoDB usando Docker.
 
-👥 Integrantes
-Melissa Vieira e Caroline Vantim
+## 🧰 Requisitos
 
+- Docker
+- Docker Compose
 
-⚙️ Funcionalidades: 
-C R U D
+## 🚀 Subindo o Projeto
 
-Cadastro de eventos
+```bash
+git clone https://github.com/CarolineVantim/plataforma_eventos.git
+cd seu-repo
+cp .env.example .env
+```
 
-Listagem de eventos
+### 1. Configure seu `.env`
 
-Edição e exclusão de eventos
+Edite o arquivo `.env` com as seguintes configurações de MongoDB:
 
-Integração com o MongoDB para armazenamento de dados
+```
+DB_CONNECTION=mongodb
+DB_HOST=mongo
+DB_PORT=27017
+DB_DATABASE=meubanco
+DB_USERNAME=meuusuario
+DB_PASSWORD=senhasecreta
+```
 
-Interface web simples para interação com os dados
+### 2. Levante os containers
 
+```bash
+docker-compose up -d --build
+```
 
+Esse comando irá subir:
+- 🐘 Laravel (PHP + Nginx)
+- 🍃 MongoDB
 
-🎓 Instituição
-FATEC - Faculdade de Tecnologia de Araras
-Curso de Desenvolvimento de Software Multiplataforma
-Disciplina: Banco de Dados Não Relacional
-3º Semestre
+### 3. Acesse o container Laravel
+
+```bash
+docker exec -it eventos-plataforma-app-1 bash
+```
+
+E então execute:
+
+```bash
+composer install
+php artisan key:generate
+php artisan config:clear
+php artisan migrate
+```
+
+### 4. Teste a conexão com o MongoDB
+
+Dentro do container Laravel:
+
+```bash
+php artisan tinker
+```
+
+E então:
+
+```php
+DB::connection()->getMongoClient()->listDatabases();
+```
+
+Se retornar as databases: ✅ está conectado!
+
+## 🐳 Containers
+
+| Serviço         | Porta Local | Descrição                    |
+|----------------|-------------|------------------------------|
+| Laravel App     | 8909        | http://localhost:8989        |
+| MongoDB         | 27017       | Banco de dados               |
+
+## 🧪 Testes
+
+Para rodar os testes da aplicação:
+
+```bash
+php artisan test
+```
+
+## ✍️ Autor
+
+Desenvolvido por Caroline 💻🚀
+Desenvolvido por Melissa 💻🚀
