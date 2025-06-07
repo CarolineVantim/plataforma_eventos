@@ -44,13 +44,16 @@ return [
 
         'mongodb' => [
             'driver'   => 'mongodb',
-            'host'     => env('DB_HOST', '127.0.0.1'),
-            'port'     => env('DB_PORT', 27017),
-            'database' => env('DB_DATABASE'),
-            'username' => env('DB_USERNAME'),
-            'password' => env('DB_PASSWORD'),
-            'options'  => []
+            'host'     => env('DB_MONGO_HOST', 'mongo'),
+            'port'     => env('DB_MONGO_PORT', 27017),
+            'database' => env('DB_MONGO_DATABASE', 'meubanco'),
+            'username' => env('DB_MONGO_USERNAME', 'meuusuario'),
+            'password' => env('DB_MONGO_PASSWORD', 'senhasecreta'),
+            'options'  => [
+                'authSource' => env('DB_AUTH_SOURCE', 'meubanco'),
+            ],
         ],
+
 
         'mysql' => [
             'driver' => 'mysql',
