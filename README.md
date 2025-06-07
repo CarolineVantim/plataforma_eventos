@@ -73,7 +73,7 @@ Se retornar as databases: ✅ está conectado!
 
 | Serviço         | Porta Local | Descrição                    |
 |----------------|-------------|------------------------------|
-| Laravel App     | 8909        | http://localhost:8989        |
+| Laravel App     | 8989        | http://localhost:8989        |
 | MongoDB         | 27017       | Banco de dados               |
 
 ## 🧪 Testes
