@@ -29,6 +29,36 @@ class EventoController extends Controller
         return $evento;
     }
 
+    public function inscrever(Request $request, $id)
+    {
+        $request->validate([
+            'nome' => 'required|string',
+            'email' => 'required|email',
+        ]);
+
+        $evento = Evento::findOrFail($id);
+
+        if ($evento->vagas_disponiveis <= 0) {
+            return response()->json(['message' => 'Não há vagas disponíveis'], 422);
+        }
+
+        if (collect($evento->inscritos)->pluck('email')->contains($request->email)) {
+            return response()->json(['message' => 'Você já está inscrito neste evento'], 409);
+        }
+
+        $evento->inscritos[] = [
+            'nome' => $request->nome,
+            'email' => $request->email,
+            'inscrito_em' => now(),
+        ];
+
+        $evento->vagas_disponiveis = max(0, $evento->vagas_disponiveis - 1);
+
+        $evento->save();
+
+        return response()->json(['message' => 'Inscrição realizada com sucesso']);
+    }
+
     public function destroy($id)
     {
         $evento = Evento::findOrFail($id);
