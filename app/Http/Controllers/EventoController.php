@@ -46,11 +46,13 @@ class EventoController extends Controller
             return response()->json(['message' => 'Você já está inscrito neste evento'], 409);
         }
 
-        $evento->inscritos[] = [
+        $inscritos = $evento->inscritos ?? [];
+        $inscritos[] = [
             'nome' => $request->nome,
             'email' => $request->email,
             'inscrito_em' => now(),
         ];
+        $evento->inscritos = $inscritos;
 
         $evento->vagas_disponiveis = max(0, $evento->vagas_disponiveis - 1);
 
