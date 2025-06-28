@@ -1,0 +1,220 @@
+# Nome do Workflow
+name: Laravel Docker CI/CD
+
+# Eventos que disparam o workflow
+on:
+  push:
+    branches:
+      - main # Dispara o pipeline em cada push para a branch 'main'
+  pull_request:
+    branches:
+      - main # Dispara o pipeline em cada Pull Request para a branch 'main'
+
+# Variáveis de ambiente globais para o workflow
+env:
+  # Nome da imagem Docker (ajuste conforme seu registro)
+  # RECOMENDAÇÃO: Use o GitHub Container Registry (GHCR) para integração mais fácil.
+  # Formato para GHCR: ghcr.io/<seu_usuario_github>/<nome_do_repositorio_github>
+  # Exemplo: IMAGE_NAME: ghcr.io/caroline/meu-backend-laravel
+  # Se usar Docker Hub: <seu_usuario_docker_hub>/<nome_da_imagem>
+  IMAGE_NAME: ghcr.io/${{ github.repository }} # <--- ATUALIZE ESTE CAMPO (ou use a variável github.repository)
+  PHP_VERSION: 8.2
+
+# Definição dos Jobs
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest # O ambiente onde o job será executado (uma máquina virtual Ubuntu)
+
+    steps:
+    - name: Checkout Código
+      uses: actions/checkout@v4 # Ação para clonar o repositório
+
+    - name: Login no Registro Docker (GitHub Container Registry ou Docker Hub)
+      # Esta etapa autentica o GitHub Actions no seu registro Docker.
+      # Para GitHub Container Registry (GHCR), use GITHUB_ACTOR (usuário atual) e GITHUB_TOKEN (token de build, built-in).
+      # Para Docker Hub, use DOCKER_USERNAME (seu secret) e DOCKER_TOKEN (seu secret).
+      uses: docker/login-action@v3
+      with:
+        # Se estiver usando GitHub Container Registry (GHCR), use:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+        # Se estiver usando Docker Hub, use seus secrets específicos (descomente e preencha):
+        # username: ${{ secrets.DOCKER_USERNAME }}
+        # password: ${{ secrets.DOCKER_TOKEN }}
+
+    - name: Configurar Docker Buildx
+      # Essencial para builds de Docker mais avançadas, incluindo cache.
+      uses: docker/setup-buildx-action@v3
+
+    - name: Construir Imagem Docker (Serviço 'app')
+      # Este passo constrói a imagem do seu serviço 'app' usando o Dockerfile.
+      # 'push: false' significa que ele constrói a imagem localmente no runner, mas não a envia para o registro ainda.
+      uses: docker/build-push-action@v5
+      with:
+        context: . # O contexto de build é o diretório raiz do repositório
+        file: ./Dockerfile # Caminho para o seu Dockerfile
+        push: false # Não envia a imagem para o registro ainda
+        tags: ${{ env.IMAGE_NAME }}:test # Tag da imagem para o estágio de teste
+
+    - name: Preparar Ambiente de Teste com Docker Compose
+      # Cria um arquivo docker-compose.test.yml temporário no runner.
+      # Este arquivo levanta os serviços 'app' (com o Dockerfile local), 'mongo' e 'redis'
+      # para que os testes de integração possam ser executados.
+      run: |
+        cat <<EOF > docker-compose.test.yml
+        version: '3.8'
+        services:
+          app:
+            build:
+              context: .
+              dockerfile: Dockerfile
+            # Não monte o volume aqui para garantir que o código seja o da imagem construída
+            environment:
+              # Variáveis de ambiente para a aplicação Laravel dentro do container de teste
+              APP_ENV: testing
+              DB_CONNECTION: mongodb # Ou 'mysql' se você usa MySQL/MariaDB para testes
+              DB_HOST: mongo
+              DB_PORT: 27017
+              DB_DATABASE: testing_db # Nome do banco de dados para testes
+              DB_USERNAME: meuusuario # Credenciais do MongoDB para testes
+              DB_PASSWORD: senhasecreta
+              REDIS_HOST: redis
+            networks:
+              - laravel
+            # Sobrescreve o ENTRYPOINT para que possamos executar comandos Artisan
+            entrypoint: ["php", "artisan"]
+            # Adiciona dependência explícita aos serviços de banco de dados para garantir que eles estejam prontos
+            depends_on:
+              mongo:
+                condition: service_healthy
+              redis:
+                condition: service_healthy
+          mongo:
+            image: mongo:latest
+            # Configuração de healthcheck para o MongoDB
+            healthcheck:
+              test: ["CMD", "mongosh", "--eval", "db.runCommand({ ping: 1 })", "meubanco", "-u", "meuusuario", "-p", "senhasecreta"] # Ajuste as credenciais
+              interval: 5s
+              timeout: 2s
+              retries: 10
+            environment:
+              MONGO_INITDB_ROOT_USERNAME: admin
+              MONGO_INITDB_ROOT_PASSWORD: adminpassword
+              MONGO_INITDB_DATABASE: testing_db
+              MONGO_INITDB_USERNAME: meuusuario
+              MONGO_INITDB_PASSWORD: senhasecreta
+            networks:
+              - laravel
+          redis:
+            image: redis:latest
+            # Configuração de healthcheck para o Redis
+            healthcheck:
+              test: ["CMD", "redis-cli", "ping"]
+              interval: 5s
+              timeout: 2s
+              retries: 10
+            networks:
+              - laravel
+        networks:
+          laravel:
+            driver: bridge
+        EOF
+        # Levanta os serviços em segundo plano e constrói a imagem 'app'
+        docker compose -f docker-compose.test.yml up -d --build
+
+        # Instala as dependências Composer novamente, caso o cache da camada não esteja perfeito
+        # ou se o Dockerfile não copiar tudo
+        docker compose -f docker-compose.test.yml exec -T app composer install --no-dev
+
+        # Gera a chave da aplicação Laravel para o ambiente de teste
+        docker compose -f docker-compose.test.yml exec -T app php artisan key:generate
+
+        # Executa as migrações de banco de dados para o ambiente de teste
+        docker compose -f docker-compose.test.yml exec -T app php artisan migrate --env=testing --force
+
+    - name: Executar Testes PHPUnit dentro do Container da Aplicação
+      # Executa os testes do Laravel dentro do container 'app'.
+      run: |
+        docker compose -f docker-compose.test.yml exec -T app php artisan test
+
+    - name: Executar Análise Estática (PHPStan) dentro do Container da Aplicação
+      # Executa o PHPStan para verificar a qualidade do código.
+      run: |
+        docker compose -f docker-compose.test.yml exec -T app composer require --dev phpstan/phpstan --no-interaction
+        docker compose -f docker-compose.test.yml exec -T app ./vendor/bin/phpstan analyse --memory-limit=2G
+
+    - name: Encerrar Ambiente de Teste
+      # Garante que os containers sejam derrubados mesmo se os passos anteriores falharem.
+      if: always()
+      run: docker compose -f docker-compose.test.yml down
+
+  deploy:
+    needs: build-and-test # Este job só é executado se o job 'build-and-test' for bem-sucedido
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' # Só faz deploy se for um push para a branch 'main' (ambiente de produção)
+
+    steps:
+    - name: Checkout Código
+      uses: actions/checkout@v4
+
+    - name: Login no Registro Docker (GitHub Container Registry ou Docker Hub)
+      uses: docker/login-action@v3
+      with:
+        # Se estiver usando GitHub Container Registry (GHCR), use:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+        # Se estiver usando Docker Hub, use seus secrets específicos (descomente e preencha):
+        # username: ${{ secrets.DOCKER_USERNAME }}
+        # password: ${{ secrets.DOCKER_TOKEN }}
+
+    - name: Configurar Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Construir e Enviar Imagem Docker (Serviço 'app') para o Registro
+      # Agora, a imagem é construída e enviada para o seu registro Docker.
+      # Usamos 'push: true' e tags 'latest' e com o SHA do commit para versionamento.
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ./Dockerfile
+        push: true # Envia a imagem para o registro
+        tags: ${{ env.IMAGE_NAME }}:latest,${{ env.IMAGE_NAME }}:${{ github.sha }} # Tag 'latest' e uma tag com o SHA do commit
+
+    - name: Deploy para Servidor de Produção via SSH
+      # Este é um exemplo de como fazer o deploy via SSH.
+      # VOCÊ PRECISARÁ ADAPTAR ESTE PASSO para o seu método de deploy real (Kubernetes, AWS ECS, DigitalOcean, etc.).
+      uses: appleboy/ssh-action@master
+      with:
+        host: ${{ secrets.PROD_SSH_HOST }} # Host do seu servidor de produção
+        username: ${{ secrets.PROD_SSH_USERNAME }} # Usuário SSH
+        key: ${{ secrets.PROD_SSH_PRIVATE_KEY }} # Chave SSH privada (como secret)
+        script: |
+          # Navegue até o diretório da sua aplicação no servidor
+          # Certifique-se de que você tem um 'docker-compose.prod.yml' neste local.
+          cd /path/to/your/app/on/server # <--- ATUALIZE ESTE CAMPO
+
+          # Login no registro Docker no servidor (se necessário)
+          # Se estiver usando GitHub Container Registry (GHCR) e o servidor tiver acesso ao GitHub,
+          # você pode usar um token de deploy ou Personal Access Token.
+          # Exemplo para GHCR:
+          echo "${{ secrets.PROD_GITHUB_TOKEN_FOR_GHCR }}" | docker login ghcr.io -u ${{ secrets.PROD_GHCR_USERNAME }} --password-stdin
+          # Se estiver usando Docker Hub:
+          # docker login -u ${{ secrets.DOCKER_USERNAME }} -p ${{ secrets.DOCKER_TOKEN }}
+
+          # Puxa a imagem mais recente do registro
+          docker pull ${{ env.IMAGE_NAME }}:latest
+
+          # Atualiza os containers usando o docker-compose de produção
+          # O --remove-orphans remove containers para serviços que não estão mais definidos no compose file.
+          docker compose -f docker-compose.prod.yml up -d --remove-orphans
+
+          # Limpeza de imagens Docker antigas (opcional)
+          docker image prune -f
+
+          # Comandos pós-deploy Laravel (executados no novo container 'app')
+          # Executa migrações de banco de dados
+          docker compose -f docker-compose.prod.yml exec -T app php artisan migrate --force
+          # Otimiza a aplicação Laravel
+          docker compose -f docker-compose.prod.yml exec -T app php artisan optimize
+          # Reinicia serviços web no host se não estiverem em containers gerenciados pelo docker-compose
+          # Ex: sudo service nginx reload
